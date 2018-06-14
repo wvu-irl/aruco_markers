@@ -1,0 +1,17 @@
+<launch>
+
+  <!-- video device number from /dev/videoX (e.g. /dev/video0) -->
+  <arg name="video_device_num" default="0" />
+  <!-- loop rate ~ frames per second -->
+  <arg name="loop_rate" default="60" />
+  <!-- size of markers in meters -->
+  <arg name="marker_size" default="0.031" />
+
+  <node name="find_marker_node" pkg="aruco_markers" type="find_marker_node" output="screen">
+    <rosparam command="load" file="$(find aruco_markers)/launch/launch_params/usb_cam_calibration.yaml" />
+    <param name="video_device_num" value="$(arg video_device_num)" />
+    <param name="loop_rate" value="$(arg loop_rate)" />
+    <param name="marker_size" value="$(arg marker_size)" />
+  </node>
+
+</launch>
