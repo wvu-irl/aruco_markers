@@ -40,6 +40,7 @@
 #include <geometry_msgs/Vector3.h>
 #include <image_transport/image_transport.h>
 #include <cv_bridge/cv_bridge.h>
+#include <sensor_msgs/image_encodings.h>
 
 // aruco api: https://docs.opencv.org/3.4/d9/d53/aruco_8hpp.html
 #include <opencv2/aruco.hpp>
@@ -47,11 +48,54 @@
 #include <aruco_markers/MarkerArray.h>
 
 #include <ros/console.h>
+#include <iostream>
+#include <geometry_msgs/Pose2D.h>
+
+cv::Mat image_; // drawn on image
+
+void image_clk(const sensor_msgs::ImageConstPtr& msg)
+{
+  cv_bridge::CvImagePtr cv_ptr;
+  try
+  {
+    cv_ptr = cv_bridge::toCvCopy(msg,sensor_msgs::image_encodings::BGR8);
+  }
+  catch (cv_bridge::Exception& e)
+  {
+    ROS_ERROR("Could not convert from <%s> to <bgr8>", msg->encoding.c_str());
+  }
+
+  image_ = cv_ptr->image;
+  // cv::imshow("view", cv_ptr->image);
+  // cv::waitKey(1);
+}
 
 int main(int _argc, char** _argv)
 {
   ros::init(_argc, _argv, "find_marker_node");
   ros::NodeHandle nh;
+
+  // retrieving parameters from launch file
+  std::vector<double> cam_matrix_data;
+  nh.getParam("/find_marker_node/camera_matrix/data", cam_matrix_data);
+
+  std::vector<double> dist_coeffs_data;
+  nh.getParam("/find_marker_node/distortion_coefficients/data", dist_coeffs_data);
+
+  bool use_video_device;
+  nh.getParam("/find_marker_node/use_video_device", use_video_device);
+
+  std::string image_topic;
+  nh.getParam("/find_marker_node/image_topic", image_topic);
+
+  int video_device_num; // video device number
+  nh.getParam("/find_marker_node/video_device_num", video_device_num);
+
+  int lr; // loop rate
+  nh.getParam("/find_marker_node/loop_rate", lr);
+
+  float marker_size;
+  nh.getParam("/find_marker_node/marker_size", marker_size);
 
   image_transport::ImageTransport it(nh);
 
@@ -67,21 +111,12 @@ int main(int _argc, char** _argv)
   sensor_msgs::ImagePtr img_marker_msg;
   image_transport::Publisher pub_marker_img = it.advertise("/camera/image_marker", 480*640);
 
-  // retrieving parameters from launch file
-  std::vector<double> cam_matrix_data;
-  nh.getParam("/find_marker_node/camera_matrix/data", cam_matrix_data);
-
-  std::vector<double> dist_coeffs_data;
-  nh.getParam("/find_marker_node/distortion_coefficients/data", dist_coeffs_data);
-
-  int video_device_num; // video device number
-  nh.getParam("/find_marker_node/video_device_num", video_device_num);
-
-  int lr; // loop rate
-  nh.getParam("/find_marker_node/loop_rate", lr);
-
-  float marker_size;
-  nh.getParam("/find_marker_node/marker_size", marker_size);
+  image_transport::Subscriber sub_image;
+  if (!use_video_device)
+  {
+    // subscribe to camera/image topic
+    sub_image = it.subscribe(image_topic, 640*480, image_clk, ros::VoidPtr());
+  }
 
   // predefined aruco marker dictionary
   cv::Ptr<cv::aruco::Dictionary> dict = cv::aruco::getPredefinedDictionary(cv::aruco::DICT_5X5_50);
@@ -95,9 +130,13 @@ int main(int _argc, char** _argv)
   cv::Mat camera_matrix(cv::Size(3,3), CV_64F, cam_matrix_data.data());
   cv::Mat distort_coeffs(cv::Size(1,5), CV_64F, dist_coeffs_data.data());
 
-  // opens up camera device
-  cv::VideoCapture capture(video_device_num);
-  cv::Mat image; // drawn on image
+  cv::VideoCapture capture;
+  if (use_video_device)
+  {
+    // opens up camera device
+    capture.open(video_device_num);
+  }
+
   cv::Mat raw_img; // copied raw imag
 
   uint count = 0;
@@ -105,23 +144,27 @@ int main(int _argc, char** _argv)
 
   while (nh.ok())
   {
-    // capture new image frame
-    capture >> image;
-
-    if(!image.empty() && cv::sum(image-raw_img)[0] != 0) // checks if a new image
+    if (use_video_device)
     {
-      image.copyTo(raw_img);
+      // capture new image frame
+      capture >> image_;
+    }
+
+    if(!image_.empty() && cv::sum(image_-raw_img)[0] != 0) // checks if a new image
+    {
+      image_.copyTo(raw_img);
 
       marker_array.markers.clear();
       marker_ids.clear();
 
-      cv::aruco::detectMarkers(image, dict, marker_corners, marker_ids);
+      cv::aruco::detectMarkers(image_, dict, marker_corners, marker_ids);
 
       if (marker_ids.size() > 0)
       {
         aruco_markers::Marker marker;
+        geometry_msgs::Pose2D pixel_corners;
 
-        cv::aruco::drawDetectedMarkers(image, marker_corners, marker_ids);
+        cv::aruco::drawDetectedMarkers(image_, marker_corners, marker_ids);
         cv::aruco::estimatePoseSingleMarkers(marker_corners, marker_size, camera_matrix, distort_coeffs, rvecs, tvecs);
 
         // publishes to /markers topic
@@ -141,12 +184,28 @@ int main(int _argc, char** _argv)
           marker.tvec.y = tvecs[i][1];
           marker.tvec.z = tvecs[i][2];
 
+          pixel_corners.x = marker_corners[i][0].x;
+          pixel_corners.y = marker_corners[i][0].y;
+          marker.pixel_corners.push_back(pixel_corners);
+
+          pixel_corners.x = marker_corners[i][1].x;
+          pixel_corners.y = marker_corners[i][1].y;
+          marker.pixel_corners.push_back(pixel_corners);
+
+          pixel_corners.x = marker_corners[i][2].x;
+          pixel_corners.y = marker_corners[i][2].y;
+          marker.pixel_corners.push_back(pixel_corners);
+
+          pixel_corners.x = marker_corners[i][3].x;
+          pixel_corners.y = marker_corners[i][3].y;
+          marker.pixel_corners.push_back(pixel_corners);
+
           marker_array.markers.push_back(marker);
 
-          cv::aruco::drawAxis(image, camera_matrix, distort_coeffs, rvecs[i], tvecs[i], marker_size);
+          cv::aruco::drawAxis(image_, camera_matrix, distort_coeffs, rvecs[i], tvecs[i], marker_size);
         }
       }
-      
+
       // cv::namedWindow("image", CV_WINDOW_AUTOSIZE);
       // cv::imshow("image", image);
       // cv::waitKey(1);
@@ -154,7 +213,7 @@ int main(int _argc, char** _argv)
       img_raw_msg = cv_bridge::CvImage(std_msgs::Header(), "bgr8", raw_img).toImageMsg();
       pub_raw_img.publish(img_raw_msg);
 
-      img_marker_msg = cv_bridge::CvImage(std_msgs::Header(), "bgr8", image).toImageMsg();
+      img_marker_msg = cv_bridge::CvImage(std_msgs::Header(), "bgr8", image_).toImageMsg();
       pub_marker_img.publish(img_marker_msg);
 
   		pub_marker.publish(marker_array);

@@ -39,6 +39,12 @@ This is a simple C++ program (not a ROS node).
   * Edit the default parameters to your needs:
 
     ```
+    <!-- Set to true if using image from video device
+         Set to false if using image from ROS image topic -->
+    <arg name="use_video_device" default="true" />
+    <!-- If subscribing to ROS image topic, set above arg use_video_device to false -->
+    <arg name="image_topic" default="/camera/color/image_raw" />
+
     <!-- video device number from /dev/videoX (e.g. /dev/video0) -->
     <arg name="video_device_num" default="0" />
     <!-- loop rate ~ frames per second -->
