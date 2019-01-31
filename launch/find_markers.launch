@@ -1,7 +1,7 @@
 <launch>
   <!-- Set to true if using image from video device
        Set to false if using image from ROS image topic -->
-  <arg name="use_video_device" default="true" />
+  <arg name="use_video_device" default="false" />
   <!-- If subscribing to ROS image topic, set above arg use_video_device to false -->
   <arg name="image_topic" default="/camera/color/image_raw" />
 
