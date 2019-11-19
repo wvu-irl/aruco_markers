@@ -50,6 +50,10 @@
 #include <ros/console.h>
 #include <iostream>
 #include <geometry_msgs/Pose2D.h>
+#include <geometry_msgs/Pose.h>
+#include <tf2/LinearMath/Quaternion.h>
+#include <cmath>
+#define _USE_MATH_DEFINES // for math constants (M_PI)
 
 cv::Mat image_; // drawn on image
 
@@ -184,6 +188,42 @@ int main(int _argc, char** _argv)
           marker.tvec.y = tvecs[i][1];
           marker.tvec.z = tvecs[i][2];
 
+          // calculating rpy from rvec
+          double angle = sqrt(marker.rvec.x*marker.rvec.x
+                              + marker.rvec.y*marker.rvec.y
+                              + marker.rvec.z*marker.rvec.z);
+          double x = marker.rvec.x/angle;
+          double y = marker.rvec.y/angle;
+          double z = marker.rvec.z/angle;
+
+          // from camera to marker ref frame
+          tf2::Quaternion q(x*sin(angle/2),
+                                       y*sin(angle/2),
+                                       z*sin(angle/2),
+                                       cos(angle/2));
+
+          double roll, pitch, yaw;
+          // roll (x-axis rotation)
+          double sinr_cosp = 2.0 * (q.w() * q.x() + q.y() * q.z());
+          double cosr_cosp = 1.0 - 2.0 * (q.x() * q.x() + q.y() * q.y());
+          roll = atan2(sinr_cosp, cosr_cosp);
+
+          // pitch (y-axis rotation)
+          double sinp = 2.0 * (q.w() * q.y() - q.z() * q.x());
+          if (fabs(sinp) >= 1)
+            pitch = copysign(M_PI / 2, sinp); // use 90 degrees if out of range
+          else
+          pitch = asin(sinp);
+
+          // yaw (z-axis rotation)
+          double siny_cosp = 2.0 * (q.w() * q.z() + q.x() * q.y());
+          double cosy_cosp = 1.0 - 2.0 * (q.y() * q.y() + q.z() * q.z());
+          yaw = atan2(siny_cosp, cosy_cosp);
+
+          marker.rpy.x = roll;
+          marker.rpy.y = pitch;
+          marker.rpy.z = yaw;
+
           pixel_corners.x = marker_corners[i][0].x;
           pixel_corners.y = marker_corners[i][0].y;
           marker.pixel_corners.push_back(pixel_corners);
@@ -216,9 +256,9 @@ int main(int _argc, char** _argv)
       img_marker_msg = cv_bridge::CvImage(std_msgs::Header(), "bgr8", image_).toImageMsg();
       pub_marker_img.publish(img_marker_msg);
 
-  		pub_marker.publish(marker_array);
+  	  pub_marker.publish(marker_array);
       ++count;
-	  }
+	}
 
     ros::spinOnce();
     loop_rate.sleep();
